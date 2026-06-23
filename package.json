@@ -1,0 +1,16 @@
+{
+  "name": "itr-credential-generation",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ITR Credentials Generation Automation — Take-Home Assignment",
+  "scripts": {
+    "dev": "concurrently --names \"SERVICE,UI\" --prefix-colors \"cyan,magenta\" \"npm run dev --prefix service\" \"npm run dev --prefix ui\"",
+    "build:all": "npm run build --prefix shared && npm run build --prefix service && npm run build --prefix automation",
+    "test:service": "npm test --prefix service",
+    "test:automation": "npm test --prefix automation",
+    "test:all": "npm run test:service && npm run test:automation"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}

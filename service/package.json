@@ -1,0 +1,38 @@
+{
+  "name": "itr-service",
+  "version": "1.0.0",
+  "description": "ITR Credentials Generation — Backend Service",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "test": "jest --runInBand --forceExit"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "mongoose": "^8.4.1",
+    "pino": "^9.2.0",
+    "pino-pretty": "^11.2.1",
+    "uuid": "^10.0.0",
+    "dotenv": "^16.4.5",
+    "cors": "^2.8.5",
+    "helmet": "^7.1.0",
+    "express-validator": "^7.2.0",
+    "cross-env": "^7.0.3",
+    "@itr/shared": "file:../shared"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/cors": "^2.8.17",
+    "@types/uuid": "^10.0.0",
+    "@types/node": "^20.14.2",
+    "typescript": "^5.4.5",
+    "ts-node-dev": "^2.0.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.5",
+    "@types/jest": "^29.5.12",
+    "supertest": "^7.0.0",
+    "@types/supertest": "^6.0.2"
+  }
+}

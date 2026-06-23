@@ -1,0 +1,14 @@
+{
+  "name": "@itr/shared",
+  "version": "1.0.0",
+  "description": "Shared types for ITR Credentials Automation",
+  "main": "dist/types.js",
+  "types": "dist/types.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5"
+  }
+}
