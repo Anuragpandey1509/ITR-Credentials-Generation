@@ -1,0 +1,131 @@
+@import "tailwindcss";
+
+:root {
+  --orange: #f97316;
+  --orange-light: #fb923c;
+  --orange-dark: #ea580c;
+  --bg: #0a0a0a;
+  --surface: #111111;
+  --surface-2: #1a1a1a;
+  --border: #262626;
+  --text: #f5f5f5;
+  --text-muted: #737373;
+  --text-dim: #404040;
+  --success: #22c55e;
+  --error: #ef4444;
+  --warn: #f59e0b;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: var(--font-inter, system-ui, sans-serif);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--surface); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* Badge */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.badge-orange { background: rgba(249,115,22,0.15); color: #f97316; }
+.badge-green  { background: rgba(34,197,94,0.15);  color: #22c55e; }
+.badge-red    { background: rgba(239,68,68,0.15);   color: #ef4444; }
+.badge-yellow { background: rgba(245,158,11,0.15);  color: #f59e0b; }
+.badge-gray   { background: rgba(115,115,115,0.15); color: #737373; }
+.badge-blue   { background: rgba(59,130,246,0.15);  color: #60a5fa; }
+
+/* Card */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px;
+}
+
+/* Btn */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border: none;
+  transition: all 0.15s;
+}
+.btn-primary { background: var(--orange); color: #fff; }
+.btn-primary:hover { background: var(--orange-dark); }
+.btn-secondary { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); }
+.btn-secondary:hover { border-color: var(--orange); color: var(--orange); }
+.btn-danger { background: rgba(239,68,68,0.1); color: var(--error); border: 1px solid rgba(239,68,68,0.3); }
+.btn-danger:hover { background: rgba(239,68,68,0.2); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Input */
+.input {
+  width: 100%;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 12px;
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.input:focus { border-color: var(--orange); }
+.input::placeholder { color: var(--text-muted); }
+
+/* Log levels */
+.log-error { color: var(--error); }
+.log-warn  { color: var(--warn); }
+.log-info  { color: var(--text); }
+.log-debug { color: var(--text-muted); }
+
+/* Phase stepper */
+.stepper { display: flex; align-items: center; gap: 0; width: 100%; }
+.step-item { display: flex; flex-direction: column; align-items: center; flex: 1; position: relative; }
+.step-item:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  width: 100%;
+  height: 2px;
+  background: var(--border);
+  z-index: 0;
+}
+.step-item.done::after, .step-item.active::after { background: var(--orange); }
+.step-dot {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  background: var(--surface);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700;
+  z-index: 1; position: relative;
+  transition: all 0.2s;
+}
+.step-dot.done  { background: var(--orange); border-color: var(--orange); color: white; }
+.step-dot.active { border-color: var(--orange); color: var(--orange); }
+.step-dot.failed { background: var(--error); border-color: var(--error); color: white; }
+.step-label { font-size: 10px; color: var(--text-muted); margin-top: 4px; text-align: center; white-space: nowrap; }
+.step-label.active { color: var(--orange); font-weight: 600; }
