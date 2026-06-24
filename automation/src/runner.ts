@@ -140,30 +140,40 @@ export async function run(jobId: string, pan: string): Promise<void> {
 
     // -----------------------------------------------------------------------
     // PHASE: FILLING_DETAILS
-    // Step 2: Select "OTP on mobile number registered with Aadhaar"
+    // Step 2 — Select reset option: "OTP on mobile number registered with Aadhaar"
+    // Step 3 — Click "Generate OTP" to send OTP to Aadhaar-linked mobile
     // -----------------------------------------------------------------------
     t = fsm.transition('FILLING_DETAILS');
     await hook.send(infoEvent('FILLING_DETAILS', 'FILLING_DETAILS_START', 'Step 2 loaded — selecting Aadhaar OTP method'), { phaseTransition: t });
 
-    // Select Aadhaar OTP radio option
-    const aadhaarSelected = await Promise.race([
-      page.locator('input[value="aadhaarOtp"]').first().click({ timeout: 8000 }).then(() => true),
-      page.locator('label:has-text("OTP on mobile number registered with Aadhaar")').first().click({ timeout: 8000 }).then(() => true),
-    ]).catch(async () => {
-      // Last resort: click by visible text
+    // --- Step 2: Select Aadhaar OTP radio button ---
+    let aadhaarSelected = false;
+    try {
+      // Try clicking the radio input directly
+      await page.locator('input[value="aadhaarOtp"]').first().click({ timeout: 8000 });
+      aadhaarSelected = true;
+    } catch {
       try {
-        await page.getByText('OTP on mobile number registered with Aadhaar').first().click({ timeout: 8000 });
-        return true;
-      } catch { return false; }
-    });
-
-    if (!aadhaarSelected) {
-      await hook.send(warnEvent('FILLING_DETAILS', 'AADHAAR_SELECT_WARN', 'Could not find Aadhaar OTP radio — trying to proceed anyway'));
-    } else {
-      await hook.send(infoEvent('FILLING_DETAILS', 'AADHAAR_OTP_SELECTED', 'Selected: OTP on mobile registered with Aadhaar'));
+        // Try clicking the label
+        await page.locator('label:has-text("OTP on mobile number registered with Aadhaar")').first().click({ timeout: 6000 });
+        aadhaarSelected = true;
+      } catch {
+        try {
+          // Last resort: click by visible text
+          await page.getByText('OTP on mobile number registered with Aadhaar').first().click({ timeout: 6000 });
+          aadhaarSelected = true;
+        } catch { /* will warn below */ }
+      }
     }
 
-    // Accept declaration checkbox if present
+    if (!aadhaarSelected) {
+      await hook.send(warnEvent('FILLING_DETAILS', 'AADHAAR_SELECT_WARN', 'Could not select Aadhaar OTP radio — attempting to continue anyway'));
+    } else {
+      await hook.send(infoEvent('FILLING_DETAILS', 'AADHAAR_OTP_SELECTED', 'Selected: OTP on mobile number registered with Aadhaar'));
+    }
+    await page.waitForTimeout(500);
+
+    // Accept declaration checkbox if present (some portal versions require it)
     try {
       const checkbox = page.locator('input[type="checkbox"]').first();
       if (await checkbox.isVisible({ timeout: 3000 })) {
@@ -172,50 +182,88 @@ export async function run(jobId: string, pan: string): Promise<void> {
       }
     } catch { /* checkbox may not be present */ }
 
-    // Click Continue / Generate OTP button
-    await hook.send(infoEvent('FILLING_DETAILS', 'CLICK_GENERATE_OTP', 'Clicking Continue to generate OTP'));
-    await page.click('button:has-text("Continue"), button:has-text("Generate OTP"), button[type="submit"]');
-    await page.waitForTimeout(2000);
+    // Click "Continue" to proceed from Step 2 to Step 3
+    await hook.send(infoEvent('FILLING_DETAILS', 'CLICK_CONTINUE_STEP2', 'Clicking Continue to go to Step 3 (Generate OTP)'));
+    await page.click('button:has-text("Continue"), button[type="submit"]');
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(1500);
 
+    // --- Step 3: Click "Generate OTP" to trigger SMS to Aadhaar-linked mobile ---
+    try {
+      const generateOtpBtn = page.locator('button:has-text("Generate OTP"), button:has-text("Send OTP")').first();
+      const isVisible = await generateOtpBtn.isVisible({ timeout: 6000 });
+      if (isVisible) {
+        await hook.send(infoEvent('FILLING_DETAILS', 'CLICK_GENERATE_OTP', 'Step 3 loaded — clicking Generate OTP'));
+        await generateOtpBtn.click();
+        await page.waitForTimeout(2000);
+      } else {
+        await hook.send(infoEvent('FILLING_DETAILS', 'GENERATE_OTP_NOT_FOUND', 'Generate OTP button not visible — OTP may already be triggered'));
+      }
+    } catch {
+      await hook.send(infoEvent('FILLING_DETAILS', 'GENERATE_OTP_SKIPPED', 'No Generate OTP button found — portal may have auto-sent OTP'));
+    }
+
+    // Wait for OTP input field to appear (confirms OTP was sent)
+    try {
+      await page.waitForSelector(
+        'input[formcontrolname="otp"], input[name="otp"], input#otp, input[placeholder*="OTP" i], input[placeholder*="Enter OTP" i]',
+        { state: 'visible', timeout: 15000 }
+      );
+      await hook.send(infoEvent('FILLING_DETAILS', 'OTP_FIELD_VISIBLE', 'OTP input field appeared — OTP has been sent to Aadhaar-linked mobile'));
+    } catch {
+      await hook.send(warnEvent('FILLING_DETAILS', 'OTP_FIELD_WAIT', 'OTP input not detected yet — proceeding to wait for operator'));
+    }
 
     // -----------------------------------------------------------------------
     // PHASE: WAITING_FOR_OTP
+    // Bot pauses here — operator reads the OTP on their phone and types it
+    // into the dashboard OTP input, then submits it.
     // -----------------------------------------------------------------------
     t = fsm.transition('WAITING_FOR_OTP');
     await hook.send(
-      infoEvent('WAITING_FOR_OTP', 'OTP_REQUESTED', 'OTP sent to Aadhaar-linked mobile. Waiting for operator to enter OTP.'),
+      infoEvent('WAITING_FOR_OTP', 'OTP_REQUESTED', 'OTP sent to Aadhaar-linked mobile. Please enter the OTP in the dashboard below.'),
       { phaseTransition: t }
     );
 
-    // OTP retry loop (wrong OTP up to 3 attempts)
+    // OTP retry loop (up to 3 wrong OTP attempts)
     let otpSuccess = false;
     let otpAttempts = 0;
     const MAX_OTP_ATTEMPTS = 3;
 
     while (!otpSuccess && otpAttempts < MAX_OTP_ATTEMPTS) {
-      // Poll service for OTP submitted by operator
+      // Poll service for OTP submitted by operator via the dashboard
       const otp = await pollForOtp(jobId, hook);
 
       // Transition to SUBMITTING_OTP
       t = fsm.transition('SUBMITTING_OTP');
       await hook.send(
-        infoEvent('SUBMITTING_OTP', 'OTP_RECEIVED', `OTP received from operator (attempt ${otpAttempts + 1}/${MAX_OTP_ATTEMPTS})`),
+        infoEvent('SUBMITTING_OTP', 'OTP_RECEIVED', `OTP received from operator — submitting (attempt ${otpAttempts + 1}/${MAX_OTP_ATTEMPTS})`),
         { phaseTransition: t }
       );
 
-      // Fill OTP field
-      const otpInput = page.locator('input[formcontrolname="otp"], input[name="otp"], input#otp, input[placeholder*="OTP"]').first();
+      // Find and fill OTP input field
+      const otpInput = page.locator(
+        'input[formcontrolname="otp"], input[name="otp"], input#otp, input[placeholder*="OTP" i], input[placeholder*="Enter OTP" i]'
+      ).first();
+      await otpInput.waitFor({ state: 'visible', timeout: 10000 });
       await otpInput.fill(otp);
+      await page.waitForTimeout(500);
 
-      await page.click('button:has-text("Validate"), button:has-text("Verify"), button:has-text("Continue"), button[type="submit"]');
-      await page.waitForTimeout(2000);
+      // Click Validate/Continue to submit OTP
+      await hook.send(infoEvent('SUBMITTING_OTP', 'OTP_SUBMITTED', 'OTP entered — clicking Validate'));
+      await page.click('button:has-text("Validate"), button:has-text("Verify OTP"), button:has-text("Continue"), button[type="submit"]');
+      await page.waitForTimeout(3000);
 
-      // Check for error
-      const errorMsg = await page.locator('.error-message, .alert-danger, [class*="error"]').textContent({ timeout: 5000 }).catch(() => null);
+      // Check if OTP was rejected
+      const errText = await page.locator(
+        'mat-error, .error-message, .alert-danger, [class*="error"], span:has-text("Invalid"), span:has-text("incorrect")'
+      ).first().textContent({ timeout: 4000 }).catch(() => null);
 
-      if (errorMsg && errorMsg.toLowerCase().includes('invalid')) {
+      if (errText && (errText.toLowerCase().includes('invalid') || errText.toLowerCase().includes('incorrect') || errText.toLowerCase().includes('wrong'))) {
         otpAttempts++;
-        await hook.send(warnEvent('SUBMITTING_OTP', 'OTP_INVALID', `Invalid OTP (attempt ${otpAttempts}/${MAX_OTP_ATTEMPTS}). ${otpAttempts < MAX_OTP_ATTEMPTS ? 'Waiting for new OTP.' : 'Max attempts reached.'}`));
+        await hook.send(warnEvent('SUBMITTING_OTP', 'OTP_INVALID',
+          `OTP rejected by portal (attempt ${otpAttempts}/${MAX_OTP_ATTEMPTS}). ${otpAttempts < MAX_OTP_ATTEMPTS ? 'Enter the correct OTP.' : 'Max attempts reached.'}`
+        ));
 
         if (otpAttempts >= MAX_OTP_ATTEMPTS) {
           throw new Error(`OTP validation failed after ${MAX_OTP_ATTEMPTS} attempts`);
@@ -224,11 +272,12 @@ export async function run(jobId: string, pan: string): Promise<void> {
         // Back to WAITING_FOR_OTP for retry
         t = fsm.transition('WAITING_FOR_OTP');
         await hook.send(
-          infoEvent('WAITING_FOR_OTP', 'OTP_RETRY', 'Waiting for correct OTP from operator'),
+          infoEvent('WAITING_FOR_OTP', 'OTP_RETRY', `Please enter the correct OTP (attempt ${otpAttempts + 1}/${MAX_OTP_ATTEMPTS})`),
           { phaseTransition: t }
         );
       } else {
         otpSuccess = true;
+        await hook.send(infoEvent('SUBMITTING_OTP', 'OTP_ACCEPTED', 'OTP validated successfully — proceeding to password reset'));
       }
     }
 
