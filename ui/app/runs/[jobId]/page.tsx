@@ -1,5 +1,5 @@
-import { fetchJob } from '../../../../lib/api';
-import { getAllEventsServer } from '../../../../lib/api-server';
+import { fetchJob } from '../../../lib/api';
+import { getAllEventsServer } from '../../../lib/api-server';
 import { RunConsole } from './RunConsole';
 import { notFound } from 'next/navigation';
 

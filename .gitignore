@@ -5,12 +5,15 @@ dist/
 out/
 
 # Environment files — NEVER commit these
+# Use the .env.example / .env.local.example files as templates
 .env
 .env.local
 .env.production
 .env.*.local
-automation/.env
-service/.env
+**/.env
+**/.env.local
+**/.env.production
+**/.env.*.local
 
 # Build outputs
 *.js.map
@@ -32,3 +35,12 @@ Thumbs.db
 playwright-report/
 test-results/
 screenshots/
+
+# Misc generated files — not for submission
+tree.txt
+
+# AI tooling artifacts — not for submission
+ui/AGENTS.md
+ui/CLAUDE.md
+AGENTS.md
+CLAUDE.md

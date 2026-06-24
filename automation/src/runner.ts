@@ -42,7 +42,7 @@ export async function run(jobId: string, pan: string): Promise<void> {
 
     // Enter User ID (PAN)
     await hook.send(infoEvent('NAVIGATING', 'ENTER_USER_ID', `Entering User ID (PAN masked)`));
-    const userIdInput = page.locator('input[formcontrolname="userId"], input[name="userId"], input#userId').first();
+    const userIdInput = page.locator('input[formcontrolname="userId"], input[name="userId"], input#userId, input#panAdhaarUserId').first();
     await userIdInput.fill(pan);
 
     // Click Continue
@@ -296,7 +296,6 @@ async function pollForOtp(jobId: string, hook: WebhookClient): Promise<string> {
     try {
       const res = await fetch(url, {
         headers: {
-          'Authorization':    `Bearer ${process.env['SERVICE_BEARER_TOKEN'] ?? ''}`,
           'X-Webhook-Secret': WEBHOOK_SECRET,
         },
       });
@@ -324,7 +323,6 @@ async function pollForCaptcha(jobId: string, hook: WebhookClient): Promise<strin
     try {
       const res = await fetch(url, {
         headers: {
-          'Authorization':    `Bearer ${process.env['SERVICE_BEARER_TOKEN'] ?? ''}`,
           'X-Webhook-Secret': WEBHOOK_SECRET,
         },
       });

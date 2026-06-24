@@ -33,11 +33,14 @@ const VALID_TRANSITIONS: Transition[] = [
   { from: 'WAITING_FOR_OTP', to: 'FAILED'          },
   { from: 'SUBMITTING_OTP',  to: 'FAILED'          },
   { from: 'SETTING_PASSWORD',to: 'FAILED'          },
-  // Cancellation
+  // Cancellation — allowed from any active (non-terminal) phase
   { from: 'IDLE',            to: 'CANCELLED'       },
   { from: 'NAVIGATING',      to: 'CANCELLED'       },
   { from: 'CAPTCHA',         to: 'CANCELLED'       },
+  { from: 'FILLING_DETAILS', to: 'CANCELLED'       },
   { from: 'WAITING_FOR_OTP', to: 'CANCELLED'       },
+  { from: 'SUBMITTING_OTP',  to: 'CANCELLED'       },
+  { from: 'SETTING_PASSWORD',to: 'CANCELLED'       },
 ];
 
 // ---------------------------------------------------------------------------

@@ -3,9 +3,9 @@
 import { useEffect, useState } from 'react';
 import type { Job, JobEvent, Phase } from '@itr/shared';
 import { fetchJob, cancelJob } from '../../../lib/api';
-import { LiveConsole } from '../../components/LiveConsole';
-import { PhaseStepper } from '../../components/PhaseStepper';
-import { OtpDialog, CaptchaDialog } from '../../components/HumanInputDialogs';
+import { LiveConsole } from '../../../components/LiveConsole';
+import { PhaseStepper } from '../../../components/PhaseStepper';
+import { OtpDialog, CaptchaDialog } from '../../../components/HumanInputDialogs';
 import { ArrowLeft, X } from '@phosphor-icons/react';
 import Link from 'next/link';
 

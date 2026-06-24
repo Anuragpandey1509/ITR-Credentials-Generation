@@ -118,7 +118,7 @@ export function LiveConsole({ jobId, initialEvents = [] }: Props) {
             <span style={{ color: 'var(--orange)', minWidth: 120, flexShrink: 0 }}>[{evt.phase}]</span>
             <span style={{ color: 'var(--text-muted)', minWidth: 180, flexShrink: 0 }}>{evt.step}</span>
             <span>{evt.message}</span>
-            {evt.meta?.captchaImage && (
+            {!!evt.meta?.captchaImage && (
               <img
                 src={evt.meta.captchaImage as string}
                 alt="CAPTCHA"
