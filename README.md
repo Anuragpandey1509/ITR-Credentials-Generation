@@ -6,6 +6,30 @@ A production-grade automation system that drives the Income Tax e-filing portal'
 
 ---
 
+## 🎬 Demo Video
+
+> **Watch the full end-to-end demonstration here:**
+> 📹 [Click to watch demo on Google Drive](YOUR_GOOGLE_DRIVE_LINK_HERE)
+
+The demo covers:
+- Submitting a PAN from the Next.js dashboard
+- Playwright browser launching and navigating the IT portal automatically
+- Real-time event log streaming via SSE
+- Forgot Password flow: PAN entry → Continue → OTP method selection screen
+- MongoDB job record visible in MongoDB Compass
+
+---
+
+## ⚠️ Demo Limitation
+
+The IT portal's password reset flow requires an **Aadhaar-linked mobile number** to receive an OTP via SMS. Since this is a live government system, completing the OTP step requires a real PAN registered on the portal with an active linked mobile number.
+
+For this demo, I do not have a personal PAN registered on the Income Tax portal with a linked mobile number. Therefore, the recorded demonstration covers all automation steps **up to and including the OTP method selection screen**, at which point the automation correctly pauses and waits for the operator to enter the OTP.
+
+**All code for OTP submission, password setting, and credential encryption is fully implemented** — it simply cannot be executed without a live, valid PAN + registered mobile number.
+
+---
+
 ## Table of Contents
 
 1. [System Overview](#system-overview)
@@ -36,8 +60,8 @@ The system has three distinct, independently deployable layers:
 2. Service spawns the Playwright bot as a child process
 3. Bot navigates the IT portal, pushing events to `POST /webhook/events` at each step
 4. Service persists events and fans them out over SSE to all connected dashboard clients
-5. When the bot reaches CAPTCHA/OTP steps, it pauses and polls for operator input
-6. Operator enters CAPTCHA/OTP in the dashboard — service stores it for the bot to consume
+5. When the bot reaches the OTP step, it pauses and polls for operator input
+6. Operator enters the OTP in the dashboard — service stores it for the bot to consume
 7. On success, credentials are encrypted (AES-256-GCM) and stored in MongoDB
 
 ---
