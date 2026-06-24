@@ -17,6 +17,22 @@ const PORTAL_URL = config.portalUrl;
 const SERVICE_URL = config.serviceUrl;
 const WEBHOOK_SECRET = config.webhookSecret;
 
+// ---------------------------------------------------------------------------
+// Helper: Wait for Angular Material CDK overlay (loading spinner) to disappear
+// before attempting any clicks — otherwise the overlay intercepts the click.
+// ---------------------------------------------------------------------------
+async function waitForOverlayToDisappear(page: Page, timeout = 10000): Promise<void> {
+  try {
+    await page.waitForSelector('.cdk-overlay-backdrop, .cdk-overlay-container .customLoaderBackdrop', {
+      state: 'hidden',
+      timeout,
+    });
+  } catch {
+    // If overlay selector not found or times out, just continue
+  }
+  await page.waitForTimeout(300);
+}
+
 export async function run(jobId: string, pan: string): Promise<void> {
   const fsm = new StateMachine(jobId, 'IDLE');
   const hook = new WebhookClient(jobId);
@@ -188,31 +204,161 @@ export async function run(jobId: string, pan: string): Promise<void> {
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(1500);
 
-    // --- Step 3: Click "Generate OTP" to trigger SMS to Aadhaar-linked mobile ---
+    // --- Step 3a: Select "Generate OTP" option (Option 2) and click Continue ---
+    await hook.send(infoEvent('FILLING_DETAILS', 'WAITING_FOR_STEP3', 'Waiting for Step 3 (Verify Identity option screen) to load...'));
+    
+    // Wait for any loading overlay to disappear, then wait for radio buttons
+    await waitForOverlayToDisappear(page);
+    await page.waitForSelector('input[type="radio"]', { timeout: 15000 });
+
+    // Step 3a has two options:
+    // 1. I already have an OTP
+    // 2. Generate OTP
+    let optionSelected = false;
     try {
-      const generateOtpBtn = page.locator('button:has-text("Generate OTP"), button:has-text("Send OTP")').first();
-      const isVisible = await generateOtpBtn.isVisible({ timeout: 6000 });
-      if (isVisible) {
-        await hook.send(infoEvent('FILLING_DETAILS', 'CLICK_GENERATE_OTP', 'Step 3 loaded — clicking Generate OTP'));
-        await generateOtpBtn.click();
-        await page.waitForTimeout(2000);
-      } else {
-        await hook.send(infoEvent('FILLING_DETAILS', 'GENERATE_OTP_NOT_FOUND', 'Generate OTP button not visible — OTP may already be triggered'));
+      // Option A: Click by label text containing "Generate"
+      const generateRadioLabel = page.locator('label:has-text("Generate"), text="Generate OTP", text="Generate Aadhaar OTP"').first();
+      if (await generateRadioLabel.isVisible({ timeout: 5000 })) {
+        await generateRadioLabel.click({ force: true });
+        optionSelected = true;
+        await hook.send(infoEvent('FILLING_DETAILS', 'GENERATE_OTP_RADIO_CLICKED', 'Selected "Generate OTP" option via label text'));
       }
-    } catch {
-      await hook.send(infoEvent('FILLING_DETAILS', 'GENERATE_OTP_SKIPPED', 'No Generate OTP button found — portal may have auto-sent OTP'));
+    } catch { /* try fallback */ }
+
+    if (!optionSelected) {
+      try {
+        // Option B: Select the second radio button on the page (index 1)
+        const radios = page.locator('input[type="radio"]');
+        const count = await radios.count();
+        if (count >= 2) {
+          await radios.nth(1).click({ force: true });
+          optionSelected = true;
+          await hook.send(infoEvent('FILLING_DETAILS', 'GENERATE_OTP_RADIO_CLICKED', 'Selected "Generate OTP" option (second radio button)'));
+        } else if (count === 1) {
+          await radios.nth(0).click({ force: true });
+          optionSelected = true;
+          await hook.send(infoEvent('FILLING_DETAILS', 'GENERATE_OTP_RADIO_CLICKED', 'Selected "Generate OTP" option (only radio button available)'));
+        }
+      } catch { /* fallback */ }
     }
 
-    // Wait for OTP input field to appear (confirms OTP was sent)
+    if (!optionSelected) {
+      await hook.send(warnEvent('FILLING_DETAILS', 'GENERATE_OTP_RADIO_WARN', 'Could not explicitly select "Generate OTP" radio, trying to proceed...'));
+    }
+
+    await page.waitForTimeout(500);
+
+    // Click Continue to proceed from option screen to consent screen
+    await hook.send(infoEvent('FILLING_DETAILS', 'CLICK_CONTINUE_STEP3', 'Clicking Continue to go to Consent screen'));
+    const continueBtnRadioScreen = page.locator('button:has-text("Continue"), button[type="submit"]').first();
+    await waitForOverlayToDisappear(page);
+    await continueBtnRadioScreen.click({ force: true });
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(2000);
+
+    // --- Step 3b: Accept consent and click "Generate Aadhaar OTP" ---
+    await hook.send(infoEvent('FILLING_DETAILS', 'WAITING_FOR_CONSENT_SCREEN', 'Waiting for Consent page to load...'));
+    
+    // In Step 3b, we must check "I agree to validate my Aadhaar details"
+    // Wait for overlay to clear before any consent interaction
+    await waitForOverlayToDisappear(page, 12000);
+    try {
+      let checked = false;
+
+      // Try Option 1: click label by text
+      const consentText = page.getByText("I agree to validate", { exact: false }).first();
+      try {
+        await consentText.waitFor({ state: 'visible', timeout: 8000 });
+        await consentText.click({ force: true });
+        checked = true;
+        await hook.send(infoEvent('FILLING_DETAILS', 'AADHAAR_CONSENT_CHECKED', 'Clicked Aadhaar consent text label'));
+      } catch { /* try fallback */ }
+
+      // Try Option 2: click raw checkbox input
+      if (!checked) {
+        const checkboxInput = page.locator('input[type="checkbox"]').first();
+        try {
+          await checkboxInput.waitFor({ state: 'visible', timeout: 3000 });
+          await checkboxInput.check({ force: true });
+          checked = true;
+          await hook.send(infoEvent('FILLING_DETAILS', 'AADHAAR_CONSENT_CHECKED', 'Checked Aadhaar consent checkbox input'));
+        } catch { /* try fallback */ }
+      }
+
+      // Try Option 3: mat-checkbox click
+      if (!checked) {
+        const matCheckbox = page.locator('mat-checkbox').first();
+        try {
+          await matCheckbox.waitFor({ state: 'visible', timeout: 3000 });
+          await matCheckbox.click({ force: true });
+          checked = true;
+          await hook.send(infoEvent('FILLING_DETAILS', 'AADHAAR_CONSENT_CHECKED', 'Clicked mat-checkbox element'));
+        } catch { /* fallback */ }
+      }
+
+      // Try Option 4: mouse coordinate click on the text label
+      if (!checked) {
+        try {
+          const consentText = page.getByText("I agree to validate", { exact: false }).first();
+          const box = await consentText.boundingBox();
+          if (box) {
+            await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+            checked = true;
+            await hook.send(infoEvent('FILLING_DETAILS', 'AADHAAR_CONSENT_CHECKED', 'Clicked Aadhaar consent text coordinates via mouse'));
+          }
+        } catch { /* fallback */ }
+      }
+
+      if (!checked) {
+        // Diagnostic HTML extraction to help troubleshoot
+        let diagJson = 'N/A';
+        try {
+          diagJson = await page.evaluate(`(() => {
+            try {
+              const checkboxes = Array.from(document.querySelectorAll('input[type="checkbox"], mat-checkbox, [role="checkbox"]'));
+              const cbInfo = checkboxes.map((c, i) => i + ': tag=' + c.tagName + ' id=' + c.id + ' class=' + c.className + ' visible=' + (c.getBoundingClientRect().width > 0));
+              
+              const labels = Array.from(document.querySelectorAll('label, span, p, div'));
+              const agreeLabels = labels
+                .filter(l => l.textContent && /agree|validate|aadhaar/i.test(l.textContent))
+                .map(l => l.tagName + ' text="' + l.textContent.trim().substring(0, 60) + '"');
+                
+              return JSON.stringify({ checkboxes: cbInfo, labels: agreeLabels.slice(0, 10) });
+            } catch (e) {
+              return 'Error in diag: ' + e.message;
+            }
+          })()`) as string;
+        } catch (e: any) {
+          diagJson = 'Eval failed: ' + e.message;
+        }
+        await hook.send(warnEvent('FILLING_DETAILS', 'AADHAAR_CONSENT_MISSING', `Could not click Aadhaar consent checkbox. Page elements: ${diagJson}`));
+      }
+
+      await page.waitForTimeout(1000);
+    } catch (err) {
+      await hook.send(warnEvent('FILLING_DETAILS', 'AADHAAR_CONSENT_ERROR', `Error in Aadhaar consent checkbox step: ${err instanceof Error ? err.message : String(err)}`));
+    }
+
+    // Now click the "Generate Aadhaar OTP" button to trigger SMS to Aadhaar-linked mobile
+    await hook.send(infoEvent('FILLING_DETAILS', 'CLICK_GENERATE_OTP', 'Clicking Generate Aadhaar OTP button'));
+    const generateBtnConsentScreen = page.locator('button:has-text("Generate Aadhaar OTP"), button:has-text("Generate OTP"), button:has-text("Continue"), button[type="submit"]').first();
+    await waitForOverlayToDisappear(page);
+    await generateBtnConsentScreen.click({ force: true });
+    await page.waitForTimeout(3000);
+
+    // Wait for OTP input field to confirm OTP was sent (make this optional so we don't fail if the selector is slightly different)
     try {
       await page.waitForSelector(
         'input[formcontrolname="otp"], input[name="otp"], input#otp, input[placeholder*="OTP" i], input[placeholder*="Enter OTP" i]',
-        { state: 'visible', timeout: 15000 }
+        { state: 'visible', timeout: 8000 }
       );
-      await hook.send(infoEvent('FILLING_DETAILS', 'OTP_FIELD_VISIBLE', 'OTP input field appeared — OTP has been sent to Aadhaar-linked mobile'));
+      await hook.send(infoEvent('FILLING_DETAILS', 'OTP_FIELD_VISIBLE', 'OTP input field is visible.'));
     } catch {
-      await hook.send(warnEvent('FILLING_DETAILS', 'OTP_FIELD_WAIT', 'OTP input not detected yet — proceeding to wait for operator'));
+      await hook.send(infoEvent('FILLING_DETAILS', 'OTP_FIELD_WAIT_TIMEOUT', 'Proceeding to ask for OTP (could not strictly verify field visibility).'));
     }
+
+
+
 
     // -----------------------------------------------------------------------
     // PHASE: WAITING_FOR_OTP
@@ -242,16 +388,52 @@ export async function run(jobId: string, pan: string): Promise<void> {
       );
 
       // Find and fill OTP input field
-      const otpInput = page.locator(
-        'input[formcontrolname="otp"], input[name="otp"], input#otp, input[placeholder*="OTP" i], input[placeholder*="Enter OTP" i]'
-      ).first();
-      await otpInput.waitFor({ state: 'visible', timeout: 10000 });
-      await otpInput.fill(otp);
+      let otpFilled = false;
+      const otpSelectors = [
+        'input[formcontrolname="otp"]', 'input[name="otp"]', 'input#otp',
+        'input[placeholder*="OTP" i]', 'input[placeholder*="Enter OTP" i]',
+        'input[autocomplete="one-time-code"]', 'input[maxlength="6"]'
+      ].join(', ');
+      
+      const otpInput = page.locator(otpSelectors).first();
+      try {
+        await otpInput.waitFor({ state: 'visible', timeout: 5000 });
+        await otpInput.fill(otp);
+        otpFilled = true;
+      } catch {
+        // Fallback: try to find the only visible text/password input on the page
+        try {
+           const visibleInputs = page.locator('input[type="text"]:visible, input[type="password"]:visible, input:not([type]):visible');
+           if (await visibleInputs.count() > 0) {
+             // Fill the first or last depending on layout, typically there's only one relevant input now
+             await visibleInputs.first().fill(otp);
+             otpFilled = true;
+           }
+        } catch { /* ignore fallback errors */ }
+      }
+
+      if (!otpFilled) {
+        throw new Error('Could not find OTP input field on the portal to fill.');
+      }
       await page.waitForTimeout(500);
 
       // Click Validate/Continue to submit OTP
       await hook.send(infoEvent('SUBMITTING_OTP', 'OTP_SUBMITTED', 'OTP entered — clicking Validate'));
-      await page.click('button:has-text("Validate"), button:has-text("Verify OTP"), button:has-text("Continue"), button[type="submit"]');
+      
+      // Look for the submit button
+      const submitBtnSelectors = [
+        'button:has-text("Validate")', 'button:has-text("Verify")', 'button:has-text("Submit")',
+        'button:has-text("Continue")', 'button[type="submit"]', '.primary-button'
+      ].join(', ');
+      
+      const submitBtn = page.locator(submitBtnSelectors).first();
+      try {
+        await submitBtn.click({ force: true, timeout: 5000 });
+      } catch {
+        // Fallback: press Enter on the OTP input
+        await page.keyboard.press('Enter');
+      }
+      
       await page.waitForTimeout(3000);
 
       // Check if OTP was rejected
