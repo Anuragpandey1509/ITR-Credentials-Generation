@@ -70,10 +70,39 @@ export async function run(jobId: string, pan: string): Promise<void> {
     await hook.send(infoEvent('NAVIGATING', 'ENTER_USER_ID_AGAIN', `Entering User ID again for Forgot Password`));
     const forgotUserIdInput = page.locator('input[formcontrolname="userId"], input[name="userId"], input#userId, input#panAdhaarUserId').first();
     await forgotUserIdInput.waitFor({ state: 'visible', timeout: 15000 });
+    // Clear any pre-filled value and type the PAN fresh
+    await forgotUserIdInput.click({ clickCount: 3 }); // triple-click to select all
+    await forgotUserIdInput.fill('');
+    await page.waitForTimeout(500);
     await forgotUserIdInput.fill(pan);
+    await page.waitForTimeout(800); // allow Angular validation to settle
 
-    // Click Continue on Forgot Password page
-    await page.click('button:has-text("Continue"), button[type="submit"]');
+    // Click Continue on Forgot Password page — use a robust locator that
+    // waits for the button to be enabled before clicking
+    await hook.send(infoEvent('NAVIGATING', 'CLICK_CONTINUE_FORGOT', 'Clicking Continue on Forgot Password page'));
+    const continueBtn = page.locator(
+      'button:has-text("Continue"), button[type="submit"]'
+    ).first();
+    // Wait until the button is visible AND enabled (Angular may keep it disabled until form is valid)
+    await continueBtn.waitFor({ state: 'visible', timeout: 15000 });
+    // Wait until the button is enabled (poll every 500ms, up to 10s)
+    for (let i = 0; i < 20; i++) {
+      if (await continueBtn.isEnabled()) break;
+      await page.waitForTimeout(500);
+    }
+    await continueBtn.click({ force: true });
+
+    // Handle any intermediate notification/popup that the portal may show
+    // (e.g. "Continue" inside a mat-dialog or notification bar)
+    try {
+      const notifContinue = page.locator(
+        'mat-dialog-container button:has-text("Continue"), .notification button:has-text("Continue"), [id*="Notification"] button:has-text("Continue")'
+      );
+      await notifContinue.waitFor({ state: 'visible', timeout: 5000 });
+      await notifContinue.click();
+      await hook.send(infoEvent('NAVIGATING', 'DISMISSED_NOTIFICATION', 'Dismissed portal notification popup'));
+    } catch { /* no popup appeared, that is fine */ }
+
     await page.waitForLoadState('domcontentloaded');
 
     // -----------------------------------------------------------------------
