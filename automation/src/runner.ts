@@ -49,6 +49,12 @@ export async function run(jobId: string, pan: string): Promise<void> {
     await page.click('button:has-text("Continue"), button[type="submit"]');
     await page.waitForLoadState('domcontentloaded');
 
+    // Check for invalid PAN error message before proceeding
+    const loginError = await page.locator('.error-message, .alert-danger, [class*="error"], p:has-text("PAN does not exist")').first().textContent({ timeout: 3000 }).catch(() => null);
+    if (loginError && loginError.toLowerCase().includes('does not exist')) {
+      throw new Error(`Invalid PAN: ${loginError.trim().replace(/\\s+/g, ' ')}`);
+    }
+
     // Click "Forgot Password?"
     await hook.send(infoEvent('NAVIGATING', 'CLICK_FORGOT_PASSWORD', 'Clicking Forgot Password'));
     await page.click('a:has-text("Forgot Password"), span:has-text("Forgot Password")');
