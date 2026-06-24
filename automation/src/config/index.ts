@@ -34,4 +34,13 @@ export const config = {
 
   /** Webhook retry attempts */
   webhookRetries: parseInt(optional('WEBHOOK_RETRIES', '5'), 10),
+
+  /**
+   * Demo mode — bypasses live OTP submission on the portal.
+   * When true, the bot simulates FILLING_DETAILS → WAITING_FOR_OTP →
+   * SUBMITTING_OTP → SETTING_PASSWORD → DONE with realistic delays so
+   * the full dashboard can be demonstrated without a real OTP.
+   * Set to true only for recordings/demos; never in production.
+   */
+  demoMode: optional('DEMO_MODE', 'false') === 'true',
 } as const;

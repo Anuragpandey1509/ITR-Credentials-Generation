@@ -13,14 +13,14 @@ import { logger } from './logger';
 //   → Enter OTP → Set new password → Done
 // ---------------------------------------------------------------------------
 
-const PORTAL_URL     = config.portalUrl;
-const SERVICE_URL    = config.serviceUrl;
+const PORTAL_URL = config.portalUrl;
+const SERVICE_URL = config.serviceUrl;
 const WEBHOOK_SECRET = config.webhookSecret;
 
 export async function run(jobId: string, pan: string): Promise<void> {
-  const fsm    = new StateMachine(jobId, 'IDLE');
-  const hook   = new WebhookClient(jobId);
-  let   handle: BrowserHandle | null = null;
+  const fsm = new StateMachine(jobId, 'IDLE');
+  const hook = new WebhookClient(jobId);
+  let handle: BrowserHandle | null = null;
 
   try {
     // -----------------------------------------------------------------------
@@ -47,7 +47,7 @@ export async function run(jobId: string, pan: string): Promise<void> {
 
     // Click Continue
     await page.click('button:has-text("Continue"), button[type="submit"]');
-    
+
     // Wait for either the password page (success) or an error message (invalid PAN)
     const loginResult = await Promise.race([
       page.waitForSelector('mat-error, .error-message, .error-text', { state: 'visible', timeout: 15000 }).then(() => 'error'),
@@ -93,7 +93,6 @@ export async function run(jobId: string, pan: string): Promise<void> {
     await continueBtn.click({ force: true });
 
     // Handle any intermediate notification/popup that the portal may show
-    // (e.g. "Continue" inside a mat-dialog or notification bar)
     try {
       const notifContinue = page.locator(
         'mat-dialog-container button:has-text("Continue"), .notification button:has-text("Continue"), [id*="Notification"] button:has-text("Continue")'
@@ -101,46 +100,83 @@ export async function run(jobId: string, pan: string): Promise<void> {
       await notifContinue.waitFor({ state: 'visible', timeout: 5000 });
       await notifContinue.click();
       await hook.send(infoEvent('NAVIGATING', 'DISMISSED_NOTIFICATION', 'Dismissed portal notification popup'));
-    } catch { /* no popup appeared, that is fine */ }
+    } catch { /* no popup */ }
 
     await page.waitForLoadState('domcontentloaded');
+    await hook.send(infoEvent('NAVIGATING', 'DETECTING_NEXT_STEP', 'Detecting portal next step after Continue...'));
 
     // -----------------------------------------------------------------------
-    // PHASE: CAPTCHA
-    // The Forgot Password page has its own form: User ID (PAN) + CAPTCHA.
-    // We must fill both before clicking Continue/Validate.
+    // PHASE: CAPTCHA (conditional)
+    // The ITR portal MAY show a CAPTCHA on the Forgot Password Step 1 page.
+    // We detect which state we are in using Promise.race:
+    //   - "captcha"       → CAPTCHA input is visible → solve it
+    //   - "select-option" → Portal jumped to Step 2 directly → skip CAPTCHA
     // -----------------------------------------------------------------------
     t = fsm.transition('CAPTCHA');
-    await hook.send(infoEvent('CAPTCHA', 'CAPTCHA_PHASE_START', 'Forgot Password page loaded — filling User ID and CAPTCHA'), { phaseTransition: t });
+    await hook.send(infoEvent('CAPTCHA', 'CAPTCHA_PHASE_START', 'Checking for CAPTCHA or Step 2 (Select Reset Option)...'), { phaseTransition: t });
 
-    await solveCaptchaWithRetry(page, jobId, hook, fsm);
+    const portalNextStep = await Promise.race([
+      page.waitForSelector(
+        'input[formcontrolname="captcha"], input[name="captcha"], input#captcha, input[placeholder*="captcha" i]',
+        { state: 'visible', timeout: 8000 }
+      ).then(() => 'captcha' as const),
+      page.waitForSelector(
+        'input[type="radio"], label:has-text("Aadhaar"), text=Select an Option to Reset Password, text=OTP on mobile number',
+        { state: 'visible', timeout: 8000 }
+      ).then(() => 'select-option' as const),
+    ]).catch(() => 'select-option' as const); // default: assume Step 2 if nothing detected
 
+    if (portalNextStep === 'captcha') {
+      await hook.send(infoEvent('CAPTCHA', 'CAPTCHA_DETECTED', 'CAPTCHA challenge detected — screenshot sent to operator'));
+      await solveCaptchaWithRetry(page, jobId, hook, fsm);
+      // After CAPTCHA solved, portal will show Step 2 — wait for it
+      await page.waitForSelector(
+        'input[type="radio"], label:has-text("Aadhaar"), text=Select an Option to Reset Password',
+        { state: 'visible', timeout: 15000 }
+      );
+    } else {
+      await hook.send(infoEvent('CAPTCHA', 'CAPTCHA_NOT_REQUIRED', 'Portal skipped CAPTCHA — now on Step 2: Select Reset Option'));
+    }
 
     // -----------------------------------------------------------------------
     // PHASE: FILLING_DETAILS
+    // Step 2: Select "OTP on mobile number registered with Aadhaar"
     // -----------------------------------------------------------------------
     t = fsm.transition('FILLING_DETAILS');
-    await hook.send(infoEvent('FILLING_DETAILS', 'FILLING_DETAILS_START', 'Selecting OTP method'), { phaseTransition: t });
+    await hook.send(infoEvent('FILLING_DETAILS', 'FILLING_DETAILS_START', 'Step 2 loaded — selecting Aadhaar OTP method'), { phaseTransition: t });
 
-    // Select "OTP on mobile number registered with Aadhaar"
-    try {
-      await page.click('input[value="aadhaarOtp"], label:has-text("Aadhaar OTP"), input[id*="aadhaar"]', { timeout: 10000 });
-    } catch {
-      // Try selecting by visible text
-      await page.getByText('OTP on mobile number registered with Aadhaar').click({ timeout: 10000 });
+    // Select Aadhaar OTP radio option
+    const aadhaarSelected = await Promise.race([
+      page.locator('input[value="aadhaarOtp"]').first().click({ timeout: 8000 }).then(() => true),
+      page.locator('label:has-text("OTP on mobile number registered with Aadhaar")').first().click({ timeout: 8000 }).then(() => true),
+    ]).catch(async () => {
+      // Last resort: click by visible text
+      try {
+        await page.getByText('OTP on mobile number registered with Aadhaar').first().click({ timeout: 8000 });
+        return true;
+      } catch { return false; }
+    });
+
+    if (!aadhaarSelected) {
+      await hook.send(warnEvent('FILLING_DETAILS', 'AADHAAR_SELECT_WARN', 'Could not find Aadhaar OTP radio — trying to proceed anyway'));
+    } else {
+      await hook.send(infoEvent('FILLING_DETAILS', 'AADHAAR_OTP_SELECTED', 'Selected: OTP on mobile registered with Aadhaar'));
     }
 
-    // Check declaration checkbox if present
+    // Accept declaration checkbox if present
     try {
       const checkbox = page.locator('input[type="checkbox"]').first();
       if (await checkbox.isVisible({ timeout: 3000 })) {
         await checkbox.check();
-        await hook.send(infoEvent('FILLING_DETAILS', 'DECLARATION_CHECKED', 'Aadhaar declaration checkbox checked'));
+        await hook.send(infoEvent('FILLING_DETAILS', 'DECLARATION_CHECKED', 'Aadhaar consent declaration checked'));
       }
     } catch { /* checkbox may not be present */ }
 
-    await hook.send(infoEvent('FILLING_DETAILS', 'CLICK_GENERATE_OTP', 'Clicking Generate OTP'));
-    await page.click('button:has-text("Generate OTP"), button:has-text("Continue"), button[type="submit"]');
+    // Click Continue / Generate OTP button
+    await hook.send(infoEvent('FILLING_DETAILS', 'CLICK_GENERATE_OTP', 'Clicking Continue to generate OTP'));
+    await page.click('button:has-text("Continue"), button:has-text("Generate OTP"), button[type="submit"]');
+    await page.waitForTimeout(2000);
+
 
     // -----------------------------------------------------------------------
     // PHASE: WAITING_FOR_OTP
@@ -205,8 +241,8 @@ export async function run(jobId: string, pan: string): Promise<void> {
     const newPassword = generateStrongPassword();
 
     // Fill new password fields
-    const pwdField    = page.locator('input[formcontrolname="newPassword"], input[name="newPassword"], input#newPassword').first();
-    const confirmPwd  = page.locator('input[formcontrolname="confirmPassword"], input[name="confirmPassword"], input#confirmPassword').first();
+    const pwdField = page.locator('input[formcontrolname="newPassword"], input[name="newPassword"], input#newPassword').first();
+    const confirmPwd = page.locator('input[formcontrolname="confirmPassword"], input[name="confirmPassword"], input#confirmPassword').first();
 
     await pwdField.fill(newPassword);
     await confirmPwd.fill(newPassword);
@@ -230,7 +266,7 @@ export async function run(jobId: string, pan: string): Promise<void> {
     );
 
     // Encrypt credentials before sending
-    const encryptedUserId   = encrypt(pan);   // PAN is the User ID on IT portal
+    const encryptedUserId = encrypt(pan);   // PAN is the User ID on IT portal
     const encryptedPassword = encrypt(newPassword);
 
     // -----------------------------------------------------------------------
