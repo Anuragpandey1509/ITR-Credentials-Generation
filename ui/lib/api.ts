@@ -11,14 +11,22 @@ function headers(extra: Record<string, string> = {}): HeadersInit {
 // Jobs
 // ---------------------------------------------------------------------------
 
-export async function fetchJobs(params?: { phase?: string; outcome?: string }): Promise<Job[]> {
+export interface PaginatedJobs {
+  jobs: Job[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export async function fetchJobs(params?: { phase?: string; outcome?: string; page?: number; limit?: number }): Promise<PaginatedJobs> {
   const qs = new URLSearchParams();
   if (params?.phase)   qs.set('phase', params.phase);
   if (params?.outcome) qs.set('outcome', params.outcome);
+  if (params?.page)    qs.set('page', String(params.page));
+  if (params?.limit)   qs.set('limit', String(params.limit));
   const res = await fetch(`${BASE}/jobs?${qs}`, { headers: headers(), cache: 'no-store' });
   if (!res.ok) throw new Error(`Failed to fetch jobs: ${res.status}`);
-  const data = await res.json() as { jobs: Job[] };
-  return data.jobs;
+  return res.json() as Promise<PaginatedJobs>;
 }
 
 export async function fetchJob(jobId: string): Promise<Job> {

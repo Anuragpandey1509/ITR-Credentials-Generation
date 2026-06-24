@@ -53,23 +53,33 @@ export interface ListJobsFilter {
   phase?: Phase;
   outcome?: Outcome;
   limit?: number;
+  page?: number;
   afterId?: string; // cursor: jobId of last item seen
 }
 
-export async function listJobs(filter: ListJobsFilter = {}): Promise<Job[]> {
+export async function listJobs(filter: ListJobsFilter = {}): Promise<{ jobs: Job[]; total: number }> {
   const query: Record<string, unknown> = {};
   if (filter.phase)   query['phase']   = filter.phase;
   if (filter.outcome) query['outcome'] = filter.outcome;
 
   const limit = filter.limit ?? 50;
+  const page = filter.page ?? 1;
+  const skip = (page - 1) * limit;
 
-  const docs = await JobModel.find(query)
-    .select('jobId panMasked phase outcome startedAt updatedAt completedAt durationMs error')
-    .sort({ updatedAt: -1 })
-    .limit(limit)
-    .lean();
+  const [docs, total] = await Promise.all([
+    JobModel.find(query)
+      .select('jobId panMasked phase outcome startedAt updatedAt completedAt durationMs error')
+      .sort({ updatedAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    JobModel.countDocuments(query),
+  ]);
 
-  return docs.map(toJobFromLean);
+  return {
+    jobs: docs.map(toJobFromLean),
+    total,
+  };
 }
 
 // ---------------------------------------------------------------------------

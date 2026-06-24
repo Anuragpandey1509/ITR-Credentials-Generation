@@ -11,13 +11,18 @@ export const revalidate = 0;
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ phase?: string; outcome?: string }>;
+  searchParams: Promise<{ phase?: string; outcome?: string; page?: string }>;
 }) {
   const params = await searchParams;
-  const [jobs, metrics] = await Promise.all([
-    fetchJobs({ phase: params.phase, outcome: params.outcome }),
+  const currentPage = params.page ? parseInt(params.page, 10) : 1;
+  const limit = 5;
+
+  const [paginatedData, metrics] = await Promise.all([
+    fetchJobs({ phase: params.phase, outcome: params.outcome, page: currentPage, limit }),
     fetchMetrics(),
   ]);
+
+  const { jobs, total } = paginatedData;
 
   return (
     <div>
@@ -39,7 +44,14 @@ export default async function DashboardPage({
         <FilterSelect name="outcome" value={params.outcome} label="Outcome" options={['success','failure','cancelled']} />
       </div>
 
-      <RunTable jobs={jobs} />
+      <RunTable 
+        jobs={jobs} 
+        currentPage={currentPage}
+        totalJobs={total}
+        limit={limit}
+        phase={params.phase}
+        outcome={params.outcome}
+      />
 
       {/* Client component that refreshes the page every 5s */}
       <DashboardRefresher />

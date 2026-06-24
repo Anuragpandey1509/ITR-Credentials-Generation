@@ -47,12 +47,18 @@ export async function run(jobId: string, pan: string): Promise<void> {
 
     // Click Continue
     await page.click('button:has-text("Continue"), button[type="submit"]');
-    await page.waitForLoadState('domcontentloaded');
+    
+    // Wait for either the password page (success) or an error message (invalid PAN)
+    const loginResult = await Promise.race([
+      page.waitForSelector('mat-error, .error-message, .error-text', { state: 'visible', timeout: 15000 }).then(() => 'error'),
+      page.waitForSelector('input[type="password"], a:has-text("Forgot Password"), span:has-text("Forgot Password")', { state: 'visible', timeout: 15000 }).then(() => 'success')
+    ]).catch(() => 'timeout');
 
-    // Check for invalid PAN error message before proceeding
-    const loginError = await page.locator('.error-message, .alert-danger, [class*="error"], p:has-text("PAN does not exist")').first().textContent({ timeout: 3000 }).catch(() => null);
-    if (loginError && loginError.toLowerCase().includes('does not exist')) {
-      throw new Error(`Invalid PAN: ${loginError.trim().replace(/\\s+/g, ' ')}`);
+    if (loginResult === 'error') {
+      const errorMsg = await page.locator('mat-error, .error-message, .error-text').first().textContent();
+      throw new Error(`Invalid PAN: ${errorMsg?.trim() || 'User ID not found'}`);
+    } else if (loginResult === 'timeout') {
+      throw new Error('Timeout waiting for next step after entering PAN');
     }
 
     // Click "Forgot Password?"
@@ -60,13 +66,26 @@ export async function run(jobId: string, pan: string): Promise<void> {
     await page.click('a:has-text("Forgot Password"), span:has-text("Forgot Password")');
     await page.waitForLoadState('domcontentloaded');
 
+    // On the Forgot Password page, we must enter the User ID again
+    await hook.send(infoEvent('NAVIGATING', 'ENTER_USER_ID_AGAIN', `Entering User ID again for Forgot Password`));
+    const forgotUserIdInput = page.locator('input[formcontrolname="userId"], input[name="userId"], input#userId, input#panAdhaarUserId').first();
+    await forgotUserIdInput.waitFor({ state: 'visible', timeout: 15000 });
+    await forgotUserIdInput.fill(pan);
+
+    // Click Continue on Forgot Password page
+    await page.click('button:has-text("Continue"), button[type="submit"]');
+    await page.waitForLoadState('domcontentloaded');
+
     // -----------------------------------------------------------------------
     // PHASE: CAPTCHA
+    // The Forgot Password page has its own form: User ID (PAN) + CAPTCHA.
+    // We must fill both before clicking Continue/Validate.
     // -----------------------------------------------------------------------
     t = fsm.transition('CAPTCHA');
-    await hook.send(infoEvent('CAPTCHA', 'CAPTCHA_PHASE_START', 'CAPTCHA phase started'), { phaseTransition: t });
+    await hook.send(infoEvent('CAPTCHA', 'CAPTCHA_PHASE_START', 'Forgot Password page loaded — filling User ID and CAPTCHA'), { phaseTransition: t });
 
     await solveCaptchaWithRetry(page, jobId, hook, fsm);
+
 
     // -----------------------------------------------------------------------
     // PHASE: FILLING_DETAILS

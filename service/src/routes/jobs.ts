@@ -42,14 +42,17 @@ jobsRouter.post(
 
 jobsRouter.get('/', requireBearer, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { phase, outcome, limit } = req.query as Record<string, string>;
-    const jobs = await jobRepo.listJobs({
+    const { phase, outcome, limit, page } = req.query as Record<string, string>;
+    const parsedLimit = limit ? parseInt(limit, 10) : 5;
+    const parsedPage = page ? parseInt(page, 10) : 1;
+    const { jobs, total } = await jobRepo.listJobs({
       phase: phase as never,
       outcome: outcome as never,
-      limit: limit ? parseInt(limit, 10) : 50,
+      limit: parsedLimit,
+      page: parsedPage,
     });
     res.setHeader('X-Request-Id', req.headers['x-request-id'] ?? '');
-    return res.json({ jobs, count: jobs.length });
+    return res.json({ jobs, total, page: parsedPage, limit: parsedLimit, count: jobs.length });
   } catch (err) {
     return next(err);
   }
